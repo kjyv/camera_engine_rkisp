@@ -24,7 +24,7 @@ LOCAL_C_INCLUDES := \
 	$(LOCAL_PATH)/../../rkisp/ia-engine/include/linux/media \
 	$(LOCAL_PATH)/../../rkisp/isp-engine \
 
-LOCAL_SHARED_LIBRARIES += librkisp libdl libdrm
+LOCAL_SHARED_LIBRARIES += librkisp libdl libdrm libjpeg
 
 ifeq ($(IS_ANDROID_OS),true)
 LOCAL_32_BIT_ONLY := true

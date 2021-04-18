@@ -24,6 +24,8 @@
 #include <interface/rkcamera_vendor_tags.h>
 #include "mediactl.h"
 
+#include <jpeglib.h>
+
 extern "C" {
 #define virtual vir
 #include <drm.h>
@@ -85,8 +87,8 @@ struct buffer {
 static char iq_file[255] = "/etc/cam_iq.xml";
 static char out_file[255];
 static char dev_name[255];
-static int width = 640;
-static int height = 480;
+static int width = 640; //4224; 
+static int height = 480; //3136;
 static int format = V4L2_PIX_FMT_NV12;
 static int fd = -1;
 static int drm_fd = -1;
@@ -104,7 +106,7 @@ static int expo_test = 0;
 static float expo_test_step = 0.005;
 
 #define DBG(...) do { if(!silent) printf(__VA_ARGS__); } while(0)
-#define ERR(...) do { fprintf(stderr, __VA_ARGS__); } while (0)
+#define ERR(...) do { if(!silent) fprintf(stderr, __VA_ARGS__); } while (0)
 #ifdef ANDROID
 #ifdef ANDROID_VERSION_ABOVE_8_X
 #define LIBRKISP "/vendor/lib64/librkisp.so"
@@ -143,7 +145,7 @@ void metadata_result_callback(const struct cl_result_callback_ops *ops,
     SmartLock lock(ctl_params->_meta_mutex);
     /* this will clone results to _result_metadata */
     ctl_params->_result_metadata = result->metas;
-    DBG("meta callback!\n");
+    ERR("meta callback!\n");
 }
 
 /*
@@ -154,10 +156,10 @@ static void construct_default_metas(CameraMetadata* metas)
 {
     int64_t exptime_range_ns[2] = {0,30*1000*1000};
     int32_t sensitivity_range[2] = {0,3200};
-    uint8_t ae_mode = ANDROID_CONTROL_AE_MODE_ON;
+    uint8_t ae_mode = ANDROID_CONTROL_AE_MODE_OFF;
     uint8_t control_mode = ANDROID_CONTROL_MODE_AUTO;
     uint8_t ae_lock = ANDROID_CONTROL_AE_LOCK_OFF;
-    int64_t exptime_ns = 10*1000*1000;
+    int64_t exptime_ns = 2500;  //== 1/400 s
     int32_t sensitivity = 1600;
 
     metas->update(ANDROID_SENSOR_INFO_EXPOSURE_TIME_RANGE, exptime_range_ns, 2);
@@ -202,11 +204,11 @@ static int rkisp_get_meta_frame_id(void* &engine, int64_t& frame_id) {
 
     entry = ctl_params->_result_metadata.find(RKCAMERA3_PRIVATEDATA_EFFECTIVE_DRIVER_FRAME_ID);
     if (!entry.count) {
-        DBG("no RKCAMERA3_PRIVATEDATA_EFFECTIVE_DRIVER_FRAME_ID\n");
+        ERR("no RKCAMERA3_PRIVATEDATA_EFFECTIVE_DRIVER_FRAME_ID\n");
         return -1;
     }
     frame_id = entry.data.i64[0];
-    DBG("meta frame id is %" PRId64 "\n", entry.data.i64[0]);
+    ERR("meta frame id is %" PRId64 "\n", entry.data.i64[0]);
 
     return 0;
 }
@@ -224,7 +226,7 @@ static int rkisp_get_meta_frame_sof_ts(void* &engine, int64_t& sof_ts) {
         return -1;
     }
     sof_ts = entry.data.i64[0];
-    DBG("meta frame timestamp is %" PRId64 "\n", entry.data.i64[0]);
+    ERR("meta frame timestamp is %" PRId64 "\n", entry.data.i64[0]);
 
     return 0;
 }
@@ -243,7 +245,7 @@ static int rkisp_getAeTime(void* &engine, float &time)
         return -1;
 
     time = entry.data.i64[0] / (1000.0 * 1000.0 * 1000.0);
-    DBG("expousre time is %f secs\n", time);
+    ERR("expousre time is %f secs\n", time);
 
     return 0;
 }
@@ -261,7 +263,7 @@ static int rkisp_getAeMaxExposureTime(void* &engine, float &time)
         return -1;
 
     time = entry.data.i64[1] / (1000.0 * 1000.0 * 1000.0);
-    DBG("expousre max time is %f secs\n", time);
+    ERR("expousre max time is %f secs\n", time);
 
     return 0;
 }
@@ -279,7 +281,7 @@ static int rkisp_getAeGain(void* &engine, float &gain)
         return -1;
 
     gain = (float)entry.data.i32[0] / 100;
-    DBG("expousre gain is %f\n", gain);
+    ERR("expousre gain is %f\n", gain);
 
     return 0;
 }
@@ -297,7 +299,7 @@ static int rkisp_getAeMaxExposureGain(void* &engine, float &gain)
         return -1;
 
     gain = entry.data.i32[1] / 100;
-    DBG("expousre max gain is %f \n", gain);
+    ERR("expousre max gain is %f \n", gain);
 
     return 0;
 }
@@ -395,7 +397,7 @@ static int rkisp_setAeMode(void* &engine, HAL_AE_OPERATION_MODE mode)
 
         ctl_params->_settings_metadata.update(ANDROID_CONTROL_AE_MODE, &ae_mode, 1);
     } else {
-        ERR("unsupported ae mode %d\n", mode);
+        DBG("unsupported ae mode %d\n", mode);
         return -1;
     }
     ctl_params->_frame_metas.id++;
@@ -487,7 +489,7 @@ static int init_drm()
 {
     int drm_fd = drmOpen("rockchip", NULL);
     if (drm_fd < 0) {
-        ERR("failed to open rockchip drm: %s\n", strerror(errno));
+        DBG("failed to open rockchip drm: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
 
@@ -517,7 +519,7 @@ static void* get_drm_buf(int drm_fd, int width, int height, int bpp)
 
     ret = drmIoctl(drm_fd, DRM_IOCTL_MODE_CREATE_DUMB, &alloc_arg);
     if (ret) {
-        ERR("failed to create dumb buffer: %s\n", strerror(errno));
+        DBG("failed to create dumb buffer: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
 
@@ -526,14 +528,14 @@ static void* get_drm_buf(int drm_fd, int width, int height, int bpp)
 
     ret = drmIoctl(drm_fd, DRM_IOCTL_MODE_MAP_DUMB, &mmap_arg);
     if (ret) {
-        ERR("failed to create map dumb: %s\n", strerror(errno));
+        DBG("failed to create map dumb: %s\n", strerror(errno));
         ret = -EINVAL;
         goto destory_dumb;
     }
 
     map = mmap(0, alloc_arg.size, PROT_READ | PROT_WRITE, MAP_SHARED, drm_fd, mmap_arg.offset);
     if (map == MAP_FAILED) {
-        ERR("failed to mmap buffer: %s\n", strerror(errno));
+        DBG("failed to mmap buffer: %s\n", strerror(errno));
         ret = -EINVAL;
         goto destory_dumb;
     }
@@ -568,7 +570,7 @@ static void* get_drm_fd(int drm_fd, int width, int height, int bpp, int *export_
 
     ret = drmIoctl(drm_fd, DRM_IOCTL_MODE_CREATE_DUMB, &alloc_arg);
     if (ret) {
-        ERR("failed to create dumb buffer: %s\n", strerror(errno));
+        DBG("failed to create dumb buffer: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
 
@@ -576,14 +578,14 @@ static void* get_drm_fd(int drm_fd, int width, int height, int bpp, int *export_
     mmap_arg.handle = alloc_arg.handle;
     ret = drmIoctl(drm_fd, DRM_IOCTL_MODE_MAP_DUMB, &mmap_arg);
     if (ret) {
-        ERR("failed to create map dumb: %s\n", strerror(errno));
+        DBG("failed to create map dumb: %s\n", strerror(errno));
         ret = -EINVAL;
         goto destory_dumb;
     }
 
     map = mmap(0, alloc_arg.size, PROT_READ | PROT_WRITE, MAP_SHARED, drm_fd, mmap_arg.offset);
     if (map == MAP_FAILED) {
-        ERR("failed to mmap buffer: %s\n", strerror(errno));
+        DBG("failed to mmap buffer: %s\n", strerror(errno));
         ret = -EINVAL;
         goto destory_dumb;
     }
@@ -591,7 +593,7 @@ static void* get_drm_fd(int drm_fd, int width, int height, int bpp, int *export_
     assert(alloc_arg.size == width * height * bpp / 8);
     ret = drmPrimeHandleToFD(drm_fd, alloc_arg.handle, 0, export_dmafd);
     if (ret) {
-        ERR("failed to export fd: %s\n", strerror(errno));
+        DBG("failed to export fd: %s\n", strerror(errno));
         ret = -EINVAL;
         goto destory_dumb;
     }
@@ -617,10 +619,81 @@ static int xioctl(int fh, int request, void *arg)
         return r;
 }
 
+/*
+Convert from YUV NV12 to JPEG
+partly taken from 
+https://www.programmersought.com/article/76006995993/
+*/
+static void compressNV12toJPEG(const vector<uint8_t>& input, const int width, const int height, vector<uint8_t>& output) {
+    struct jpeg_compress_struct cinfo;
+    struct jpeg_error_mgr jerr;
+    JSAMPROW row_ptr[1];
+    int row_stride;
+
+    uint8_t* outbuffer = NULL;
+    uint64_t outlen = 0;
+
+    cinfo.err = jpeg_std_error(&jerr);
+    jpeg_create_compress(&cinfo);
+    jpeg_mem_dest(&cinfo, &outbuffer, &outlen);
+
+    // jrow is a libjpeg row of samples array of 1 row pointer
+    cinfo.image_width = width;
+    cinfo.image_height = height;
+    cinfo.input_components = 3;
+    cinfo.in_color_space = JCS_YCbCr; //libJPEG expects YUV 3bytes, 24bit
+
+    //..segfaults
+    //cinfo.comp_info[0].h_samp_factor = 2;
+    //cinfo.comp_info[0].v_samp_factor = 2;
+
+    jpeg_set_defaults(&cinfo);
+    jpeg_set_quality(&cinfo, 90, TRUE);
+
+    jpeg_start_compress(&cinfo, TRUE);
+
+    vector<uint8_t> tmprowbuf(width * 3);
+    unsigned uOffset = width*height;
+
+    unsigned i, j = 0;
+    unsigned idx = 0;
+
+    JSAMPROW row_pointer[1];
+    row_pointer[0] = &tmprowbuf[0];
+    while (cinfo.next_scanline < cinfo.image_height) {
+        idx = 0;
+        for (i = 0; i < cinfo.image_width; i += 1) {
+            tmprowbuf[idx++] = input[i + j * width]; // Y (unique to this pixel)
+            tmprowbuf[idx++] = input[uOffset + (j / 2 * width + (i / 2) * 2)]; // U (shared between pixels)
+            tmprowbuf[idx++] = input[uOffset + (j / 2 * width + (i / 2) * 2 + 1)]; // V (shared between pixels)
+        }
+        jpeg_write_scanlines(&cinfo, row_pointer, 1);
+        j++;
+    }
+
+    jpeg_finish_compress(&cinfo);
+    jpeg_destroy_compress(&cinfo);
+
+    DBG("libjpeg produced %ld bytes", outlen);
+
+    output = vector<uint8_t>(outbuffer, outbuffer + outlen);
+}
+
+
 static void process_image(const void *p, int size)
 {
-    DBG("process_image size: %d\n",size);
-    fwrite(p, size, 1, fp);
+    ERR("process_image size: %d\n",size);
+
+    vector<uint8_t> output;
+
+    const uint8_t *intP = (uint8_t *) p;
+    vector<uint8_t> input(intP, intP + size); 
+    compressNV12toJPEG(input, width, height, output);
+
+    fwrite(&output[0], sizeof(vector<uint8_t>::value_type), output.size(), fp);
+
+    //fwrite(p, size, 1, fp);
+
     fflush(fp);
 }
 
@@ -655,7 +728,7 @@ static int read_frame(FILE *fp)
         else
             bytesused = buf.bytesused;
         process_image(buffers[i].start, bytesused);
-        DBG("bytesused %d\n", bytesused);
+        ERR("bytesused %d\n", bytesused);
 
         if (-1 == xioctl(fd, VIDIOC_QBUF, &buf))
             errno_exit("VIDIOC_QBUF"); 
@@ -668,7 +741,7 @@ static void mainloop(void)
         unsigned int count = frame_count;
         float exptime, expgain;
         int64_t frame_id, frame_sof;
-	fprintf(stderr, "start: expo %f, gain %f, step %f\n", mae_expo, mae_gain, expo_test_step);
+        //fprintf(stderr, "start: expo %f, gain %f, step %f\n", mae_expo, mae_gain, expo_test_step);
 
         if (mae_gain > 0 && mae_expo > 0)
             rkisp_setManualGainAndTime((void*&)g_3A_control_params, mae_gain, mae_expo);
@@ -676,7 +749,7 @@ static void mainloop(void)
             rkisp_setAeMode((void*&)g_3A_control_params, HAL_AE_OPERATION_MODE_AUTO);
 
         while (count-- > 0) {
-            DBG("No.%d\n",frame_count - count);
+            ERR("No.%d\n",frame_count - count);
             if(expo_test>0){
                 rkisp_setManualGainAndTime((void*&)g_3A_control_params, mae_gain, mae_expo);
                 fprintf(stderr, "expo %f, gain %f, step %f\n", mae_expo, mae_gain, expo_test_step);
@@ -692,7 +765,7 @@ static void mainloop(void)
             rkisp_get_meta_frame_sof_ts((void*&)g_3A_control_params, frame_sof);
             read_frame(fp);
         }
-        DBG("\nREAD AND SAVE DONE!\n");
+        ERR("\nREAD AND SAVE DONE!\n");
 }
 
 static void stop_capturing(void)
@@ -700,7 +773,7 @@ static void stop_capturing(void)
         enum v4l2_buf_type type;
 
     	if (_RKIspFunc.stop_func != NULL) {
-    	    DBG("stop rkisp engine\n");
+    	    ERR("stop rkisp engine\n");
     	    _RKIspFunc.stop_func(_rkisp_engine);
     	}
         type = buf_type;
@@ -818,14 +891,14 @@ static void start_capturing(void)
         }
 
     	if (_RKIspFunc.start_func != NULL) {
-    	    DBG("device manager start, capture dev fd: %d\n", fd);
+    	    ERR("device manager start, capture dev fd: %d\n", fd);
     	    _RKIspFunc.start_func(_rkisp_engine);
-    	    DBG("device manager isp_init\n");
+    	    ERR("device manager isp_init\n");
 
     	    if (_rkisp_engine == NULL) {
-    	        ERR("rkisp_init engine failed\n");
+    	        DBG("rkisp_init engine failed\n");
     	    } else {
-    	        DBG("rkisp_init engine succeed\n");
+    	        ERR("rkisp_init engine succeed\n");
     	    }
     	}
         for (i = 0; i < n_buffers; ++i) {
@@ -911,7 +984,7 @@ static void init_mmap(void)
 
         if (-1 == xioctl(fd, VIDIOC_REQBUFS, &req)) {
                 if (EINVAL == errno) {
-                        ERR("%s does not support "
+                        DBG("%s does not support "
                                  "memory mapping\n", dev_name);
                         exit(EXIT_FAILURE);
                 } else {
@@ -920,7 +993,7 @@ static void init_mmap(void)
         }
 
         if (req.count < 2) {
-                ERR("Insufficient buffer memory on %s\n",
+                DBG("Insufficient buffer memory on %s\n",
                          dev_name);
                 exit(EXIT_FAILURE);
         }
@@ -928,7 +1001,7 @@ static void init_mmap(void)
         buffers = (struct buffer*)calloc(req.count, sizeof(*buffers));
 
         if (!buffers) {
-                ERR("Out of memory\n");
+                DBG("Out of memory\n");
                 exit(EXIT_FAILURE);
         }
 
@@ -987,7 +1060,7 @@ static void init_dmabuf(int buffer_size, int width, int height)
 
     if (-1 == xioctl(fd, VIDIOC_REQBUFS, &req)) {
         if (EINVAL == errno) {
-            ERR("%s does not support dmabuf i/on\n", dev_name);
+            DBG("%s does not support dmabuf i/on\n", dev_name);
             exit(EXIT_FAILURE);
         } else {
             errno_exit("VIDIOC_REQBUFS");
@@ -997,7 +1070,7 @@ static void init_dmabuf(int buffer_size, int width, int height)
     buffers = (struct buffer*)calloc(req.count, sizeof(*buffers));
 
     if (!buffers) {
-        ERR("Out of memory\n");
+        DBG("Out of memory\n");
         exit(EXIT_FAILURE);
     }
 
@@ -1025,7 +1098,7 @@ static void init_userp(int buffer_size, int width, int height)
 
     if (-1 == xioctl(fd, VIDIOC_REQBUFS, &req)) {
         if (EINVAL == errno) {
-            ERR("%s does not support user pointer i/on\n", dev_name);
+            DBG("%s does not support user pointer i/on\n", dev_name);
             exit(EXIT_FAILURE);
         } else {
             errno_exit("VIDIOC_REQBUFS");
@@ -1035,7 +1108,7 @@ static void init_userp(int buffer_size, int width, int height)
     buffers = (struct buffer*)calloc(req.count, sizeof(*buffers));
 
     if (!buffers) {
-        ERR("Out of memory\n");
+        DBG("Out of memory\n");
         exit(EXIT_FAILURE);
     }
 
@@ -1058,7 +1131,7 @@ static void init_device(void)
 
         if (-1 == xioctl(fd, VIDIOC_QUERYCAP, &cap)) {
                 if (EINVAL == errno) {
-                        ERR("%s is no V4L2 device\n",
+                        DBG("%s is no V4L2 device\n",
                                  dev_name);
                         exit(EXIT_FAILURE);
                 } else {
@@ -1068,13 +1141,13 @@ static void init_device(void)
 
         if (!(cap.capabilities & V4L2_CAP_VIDEO_CAPTURE) &&
                 !(cap.capabilities & V4L2_CAP_VIDEO_CAPTURE_MPLANE)) {
-            ERR("%s is not a video capture device, capabilities: %x\n",
+            DBG("%s is not a video capture device, capabilities: %x\n",
                          dev_name, cap.capabilities);
                 exit(EXIT_FAILURE);
         }
 
         if (!(cap.capabilities & V4L2_CAP_STREAMING)) {
-                ERR("%s does not support streaming i/o\n",
+                DBG("%s does not support streaming i/o\n",
                     dev_name);
                 exit(EXIT_FAILURE);
         }
@@ -1104,9 +1177,9 @@ static void init_device(void)
 		//INIT RKISP
         _RKIspFunc.rkisp_handle = dlopen(LIBRKISP, RTLD_NOW);
     	if (_RKIspFunc.rkisp_handle == NULL) {
-            ERR("open %s failed\n", LIBRKISP);
+            DBG("open %s failed\n", LIBRKISP);
     	} else {
-            DBG("open %s successed\n", LIBRKISP);
+            ERR("open %s successed\n", LIBRKISP);
     	    _RKIspFunc.init_func=(rkisp_init_func)dlsym(_RKIspFunc.rkisp_handle, "rkisp_cl_init");
     	    _RKIspFunc.prepare_func=(rkisp_prepare_func)dlsym(_RKIspFunc.rkisp_handle, "rkisp_cl_prepare");
     	    _RKIspFunc.start_func=(rkisp_start_func)dlsym(_RKIspFunc.rkisp_handle, "rkisp_cl_start");
@@ -1121,7 +1194,7 @@ static void init_device(void)
     	            ERR("dlsym rkisp_start fail errmsg: %s\n", errmsg);
     	        }
     	    } else {
-                DBG("dlsym rkisp_start success\n");
+                ERR("dlsym rkisp_start success\n");
     	    }
             init_3A_control_params();
     	}
@@ -1141,7 +1214,7 @@ static void open_device(void)
         fd = open(dev_name, O_RDWR /* required */ /*| O_NONBLOCK*/, 0);
 
         if (-1 == fd) {
-                ERR("Cannot open '%s': %d, %s\n",
+                DBG("Cannot open '%s': %d, %s\n",
                          dev_name, errno, strerror(errno));
                 exit(EXIT_FAILURE);
         }
@@ -1183,7 +1256,7 @@ void parse_args(int argc, char **argv)
            break;
        case 'e':
            mae_expo = atof(optarg);
-           DBG("target expo: %f\n", mae_expo);
+           ERR("target expo: %f\n", mae_expo);
            break;
        case 'm':
            if (!strcmp("drm", optarg))
@@ -1195,7 +1268,7 @@ void parse_args(int argc, char **argv)
            break;
        case 'g':
            mae_gain = atof(optarg);
-           DBG("target gain: %f\n", mae_gain);
+           ERR("target gain: %f\n", mae_gain);
            break;
        case 'w':
            width = atoi(optarg);
@@ -1225,7 +1298,7 @@ void parse_args(int argc, char **argv)
 
        case '?':
        case 'p':
-           ERR("Usage: %s to capture rkisp1 frames\n"
+           DBG("Usage: %s to capture rkisp1 frames\n"
                   "         --width,  default 640,             optional, width of image\n"
                   "         --height, default 480,             optional, height of image\n"
                   "         --memory, default mmap,            optional, use 'mmap' or 'drm' to alloc buffers\n"
@@ -1235,7 +1308,7 @@ void parse_args(int argc, char **argv)
                   "         --device,                          required, path of video device\n"
                   "         --output,                          required, output file path, if <file> is '-', then the data is written to stdout\n"
                   "         --gain,   default 0,               optional\n"
-                  "         --expo,   default 0,               optional\n"
+                  "         --expo,   default 0,               optional, exposure in s\n"
                   "                   Manually AE is enable only if --gain and --expo are not zero\n"
                   "         --silent,                          optional, subpress debug log\n"
                   "         --expo_test,                       optional, change exposure for buffers\n",
@@ -1243,12 +1316,12 @@ void parse_args(int argc, char **argv)
            exit(-1);
 
        default:
-           ERR("?? getopt returned character code 0%o ??\n", c);
+           DBG("?? getopt returned character code 0%o ??\n", c);
        }
    }
 
    if (strlen(out_file) == 0 || strlen(dev_name) == 0) {
-        ERR("arguments --output and --device are required\n");
+        DBG("arguments --output and --device are required\n");
         exit(-1);
    }
 
