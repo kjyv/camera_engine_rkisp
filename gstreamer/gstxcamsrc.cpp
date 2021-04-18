@@ -1302,7 +1302,7 @@ gst_xcam_src_plugin_init (GstPlugin * rkisp)
 }
 
 #ifndef PACKAGE
-#define PACKAGE "libxam"
+#define PACKAGE "libxcam"
 #endif
 
 GST_PLUGIN_DEFINE (

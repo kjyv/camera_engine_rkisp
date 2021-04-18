@@ -262,6 +262,7 @@ DeviceManager::start ()
         XCAM_FAILED_STOP (ret = _isp_params_device->start(false), "start params device failed");
     }
 
+    //if (false) {
     if (_has_3a) {
         XCAM_FAILED_STOP (ret = _3a_analyzer->start (), "start analyzer failed");
 

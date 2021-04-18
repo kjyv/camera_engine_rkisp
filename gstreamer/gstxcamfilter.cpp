@@ -984,7 +984,7 @@ gst_xcam_filter_plugin_init (GstPlugin *xcamfilter)
 }
 
 #ifndef PACKAGE
-#define PACKAGE "libxam"
+#define PACKAGE "libxcam"
 #endif
 
 GST_PLUGIN_DEFINE (

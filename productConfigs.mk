@@ -54,7 +54,7 @@ PRJ_CPPFLAGS += -Wno-error=unused-function
 endif
 
 ifeq ($(IS_RKISP),true)
-PRJ_CPPFLAGS += -DRKISP=1
+PRJ_CPPFLAGS += -DRKISP=1 -g
 endif
 
 ifeq ($(IS_RKISP_v12),true)

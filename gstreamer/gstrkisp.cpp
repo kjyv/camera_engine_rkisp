@@ -39,6 +39,8 @@
 #include "isp/iq/x3a_analyze_tuner.h"
 #include "isp/x3a_analyzer_rkiq.h"
 #include "dynamic_analyzer_loader.h"
+
+#include "xcore/base/xcam_3a_types.h"
 #endif
 
 #include "fake_poll_thread.h"
@@ -711,10 +713,13 @@ gst_xcam_src_start (GstBaseSrc *src)
     rkisp->phy_subdev =
       gst_media_find_entity_by_name (rkisp->controller, "rockchip-mipi-dphy-rx");
     rkisp->lens_subdev =
-          gst_media_find_entity_by_name (rkisp->controller, "lens");
+          //gst_media_find_entity_by_name (rkisp->controller, "lens");
+          gst_media_find_entity_by_name (rkisp->controller, "m00_b_dw9718 1-000c");
 
     /* assume the last enity is sensor_subdev */
-    rkisp->sensor_subdev = gst_media_get_last_entity (rkisp->controller);
+    //rkisp->sensor_subdev = gst_media_get_last_entity (rkisp->controller);
+    rkisp->sensor_subdev = 
+          gst_media_find_entity_by_name (rkisp->controller, "m00_b_ov13850 1-0010");
 
     if (strcmp (rkisp->device,
           media_entity_get_devname (rkisp->main_path)))
@@ -850,6 +855,21 @@ gst_xcam_src_set_caps (GstBaseSrc *src, GstCaps *caps)
         rkisp->in_format,
         rkisp->field,
         info.stride [0]);
+
+    //set camera settings
+    if (device_manager->get_analyzer().ptr()) {
+	XCAM_LOG_ERROR("setting analyzer ae mode manual");
+    	device_manager->get_analyzer()->set_ae_mode(XCAM_AE_MODE_MANUAL);
+	XCAM_LOG_ERROR("setting analyzer awb mode manual");
+	XCamAwbParam awb_param = { .mode = XCAM_AWB_MODE_DAYLIGHT };
+    	device_manager->get_analyzer()->update_awb_parameters(awb_param);
+    	device_manager->get_analyzer()->set_awb_mode(XCAM_AWB_MODE_DAYLIGHT);
+	//XCAM_LOG_INFO ("setting analyzer awb manual gain");
+    	//device_manager->get_analyzer()->set_awb_manual_gain(gr, r, g, b);
+	XCAM_LOG_ERROR("setting analyzer af mode manual");
+	XCamAfParam af_param = { .frame_use = FRAME_USE_STILL, .focus_mode = AF_MODE_FIXED };
+    	device_manager->get_analyzer()->update_af_parameters(af_param);
+    }
 
     if (rkisp_cl_start(device_manager.ptr ()) != 0)
         return FALSE;

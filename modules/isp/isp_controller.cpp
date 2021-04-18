@@ -1209,6 +1209,8 @@ IspController::set_3a_exposure (X3aIspExposureResult *res)
 XCamReturn
 IspController::set_3a_exposure (struct rkisp_exposure isp_exposure)
 {
+    return XCAM_RETURN_BYPASS;
+
     if (_is_exit)
         return XCAM_RETURN_BYPASS;
 

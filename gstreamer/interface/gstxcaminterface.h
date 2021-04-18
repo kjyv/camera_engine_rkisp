@@ -467,7 +467,7 @@ struct _GstXCam3AInterface {
 };
 
 /*! \brief Get GST interface type of XCam 3A interface.
- * will try to register GsXcam3AInterface with
+ * will try to register GstXcam3AInterface with
  * g_type_register_static() if not done so yet, and in turn return the
  * interface type it returns.
  *

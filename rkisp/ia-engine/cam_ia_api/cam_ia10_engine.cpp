@@ -634,14 +634,18 @@ RESULT CamIA10Engine::updateAeConfig(struct CamIA10_DyCfg* cfg) {
 #endif
         }
         switch (set->mode) {
+            case HAL_AE_OPERATION_MODE_AUTO:
             case HAL_AE_OPERATION_MODE_MANUAL:
                aecCfg.AecMode = AEC_MODE_MANUAL;
-               aecCfg.ManExpoSecs = (float)set->frame_time_ns_min / (1000 * 1000 * 1000);
-               aecCfg.ManGains = set->manual_gains;
+               //aecCfg.ManExpoSecs = (float)set->frame_time_ns_min / (1000 * 1000 * 1000);
+               //aecCfg.ManGains = set->manual_gains;
+		aecCfg.ManGains = 1.0f;
+		aecCfg.ManExpoSecs = 0.5f;
                break;
-            case HAL_AE_OPERATION_MODE_AUTO:
+            /*case HAL_AE_OPERATION_MODE_AUTO:
                aecCfg.AecMode = AEC_MODE_AUTO;
                break;
+            */
             default: // just support auto and manual mode now
                aecCfg.AecMode = AEC_MODE_AUTO;
         }
@@ -670,7 +674,7 @@ RESULT CamIA10Engine::updateAwbConfig(struct CamIA10_DyCfg* cfg) {
             result = awbDesc->update_awb_params(awbContext, &awbInstance);
         } //result = AwbInit(&awbInstance);
 
-        if (cfg->awb_cfg.mode != HAL_WB_AUTO ||
+        if (cfg->awb_cfg.mode != HAL_WB_AUTO || cfg->awb_cfg.mode == HAL_WB_AUTO ||
             mXMLIspOutputType == isp_gray_output_type) {
             // set ie mode to gray
             char prfName[10];
@@ -736,7 +740,7 @@ RESULT CamIA10Engine::updateAwbConfig(struct CamIA10_DyCfg* cfg) {
         if (awbDesc) {
             XCamAwbParam param;
             param.mode = awbcfg.Mode == AWB_MODE_MANUAL ?
-                XCAM_AWB_MODE_MANUAL : XCAM_AWB_MODE_AUTO;
+                XCAM_AWB_MODE_MANUAL : XCAM_AWB_MODE_MANUAL; //XCAM_AWB_MODE_AUTO;
             //result = awbDesc->set_stats(awbContext, NULL);
             result = awbDesc->analyze_awb(awbContext, &param);
         } //result =  AwbRun(hAwb, NULL, &outresult);
@@ -770,7 +774,7 @@ RESULT CamIA10Engine::updateAwbConfig(struct CamIA10_DyCfg* cfg) {
        if (cfg->awb_cfg.mode != dCfgShd.awb_cfg.mode){
             LOGI("@%s %d: AwbMode changed from %d to %d", __FUNCTION__, __LINE__, dCfgShd.awb_cfg.mode, cfg->awb_cfg.mode);
             memset(&lastAwbResult, 0x00, sizeof(lastAwbResult));
-            if (cfg->awb_cfg.mode != HAL_WB_AUTO ||
+            if (cfg->awb_cfg.mode != HAL_WB_AUTO || cfg->awb_cfg.mode == HAL_WB_AUTO ||
                 mXMLIspOutputType == isp_gray_output_type) {
                 char prfName[10];
                 int i, no;
@@ -995,6 +999,7 @@ RESULT CamIA10Engine::setStatistics(struct CamIA10_Stats* stats) {
 RESULT CamIA10Engine::runAe(XCamAeParam *param, AecResult_t* result, bool first)
 {
     RESULT ret = RET_SUCCESS;
+    return ret;
     mStats.aec.frame_status = (AecFrameStatus_t)(mStats.frame_status);
 
     if (!first) {
@@ -1064,6 +1069,9 @@ RESULT CamIA10Engine::runAe(XCamAeParam *param, AecResult_t* result, bool first)
     } else {
         if (aecDesc != NULL) {
             aecDesc->set_stats(aecContext, NULL);
+            aecCfg.AecMode = AEC_MODE_MANUAL;
+   	    aecCfg.ManGains = 1.0f;
+	    aecCfg.ManExpoSecs = 0.5f;
             aecDesc->update_ae_params(aecContext, &aecCfg);
             aecDesc->analyze_ae(aecContext, NULL);
         }
@@ -1155,6 +1163,7 @@ RESULT CamIA10Engine::runAwb(XCamAwbParam *param, CamIA10_AWB_Result_t* result, 
 
     if (awbDesc) {
         ret = awbDesc->set_stats(awbContext, first ? NULL : &MeasResult);
+        awbcfg.Mode = AWB_MODE_MANUAL;
         if (first)
             awbDesc->update_awb_params(awbContext, &awbcfg);
         if ((!(dCfg.aaa_locks & HAL_3A_LOCKS_WB) &&
@@ -1316,7 +1325,7 @@ RESULT CamIA10Engine::initAWB() {
         .MinC           =  20U
     };
     awbcfg.framerate = 0;
-    awbcfg.Mode = AWB_MODE_AUTO;
+    awbcfg.Mode = AWB_MODE_MANUAL;
     awbcfg.idx = 1;
     awbcfg.damp = BOOL_TRUE;
     awbcfg.MeasMode = CAMERIC_ISP_AWB_MEASURING_MODE_YCBCR;
@@ -1835,7 +1844,10 @@ RESULT CamIA10Engine::initAEC() {
     memcpy(&aecCfg.flash_config, &pAecGlobal->flashCtrl, sizeof(pAecGlobal->flashCtrl));
     if (aecDesc != NULL) {
         XCamAeParam aeParam;
-        aeParam.mode  = XCAM_AE_MODE_AUTO;
+        aeParam.mode  = XCAM_AE_MODE_MANUAL;
+        aecCfg.AecMode = AEC_MODE_MANUAL;
+	aecCfg.ManGains = 1.0f;
+	aecCfg.ManExpoSecs = 0.5f;
         LOGD("aecCfg histmode: %d\n", aecCfg.HistMode);
         ret = aecDesc->update_ae_params(aecContext, &aecCfg);
     } //AecInit(&aecCfg);
@@ -2027,7 +2039,7 @@ mStats.aec.frame_status = (AecFrameStatus_t)mStats.frame_status;
                     aecDesc->set_stats(aecContext, &mStats.aec);
 
                     XCamAeParam aeParam;
-                    aeParam.mode  = XCAM_AE_MODE_AUTO;
+                    aeParam.mode  = XCAM_AE_MODE_MANUAL;
                     aecDesc->analyze_ae(aecContext, &aeParam);
                 } //ret = AecRun(NULL, NULL);
 
@@ -2051,7 +2063,7 @@ mStats.aec.frame_status = (AecFrameStatus_t)mStats.frame_status;
                 aecDesc->set_stats(aecContext, &mStats.aec);
 
                 XCamAeParam aeParam;
-                aeParam.mode  = XCAM_AE_MODE_AUTO;
+                aeParam.mode  = XCAM_AE_MODE_MANUAL;
                 aecDesc->analyze_ae(aecContext, &aeParam);
             }
         }
@@ -2064,7 +2076,7 @@ mStats.aec.frame_status = (AecFrameStatus_t)mStats.frame_status;
                 aecDesc->set_stats(aecContext, &mStats.aec);
 
                 XCamAeParam aeParam;
-                aeParam.mode  = XCAM_AE_MODE_AUTO;
+                aeParam.mode  = XCAM_AE_MODE_MANUAL;
                 aecDesc->analyze_ae(aecContext, &aeParam);
             } //AecRun(&mStats.aec, NULL);
 
@@ -2414,7 +2426,7 @@ RESULT CamIA10Engine::runAWB(HAL_AwbCfg* awbHalCfg) {
                 result = awbDesc->update_awb_params(awbContext, &awbInstance);
             } //result = AwbInit(&awbInstance);
 
-            if (awbHalCfg->mode != HAL_WB_AUTO) {
+            if (awbHalCfg->mode == HAL_WB_AUTO || awbHalCfg->mode != HAL_WB_AUTO) {
                 char prfName[10];
                 int i, no;
                 CamAwb_V10_IlluProfile_t* pIlluProfile = NULL;
@@ -2478,7 +2490,7 @@ RESULT CamIA10Engine::runAWB(HAL_AwbCfg* awbHalCfg) {
             memset(&outresult, 0, sizeof(AwbRunningOutputResult_t));
             if (awbDesc) {
                 XCamAwbParam param;
-                param.mode = XCAM_AWB_MODE_AUTO;
+                param.mode = XCAM_AWB_MODE_MANUAL;
                 //result = awbDesc->set_stats(awbContext, NULL);
                 result = awbDesc->analyze_awb(awbContext, &param);
             } //result =  AwbRun(hAwb, NULL, &outresult);
@@ -2507,7 +2519,7 @@ RESULT CamIA10Engine::runAWB(HAL_AwbCfg* awbHalCfg) {
             //mode change ?
             if (awbHalCfg->mode != mAWBHalCfg.mode) {
                 memset(&lastAwbResult, 0x00, sizeof(lastAwbResult));
-                if (awbHalCfg->mode != HAL_WB_AUTO) {
+                if (awbHalCfg->mode != HAL_WB_AUTO || awbHalCfg->mode == HAL_WB_AUTO) {
                     char prfName[10];
                     int i, no;
                     CamAwb_V10_IlluProfile_t* pIlluProfile = NULL;
@@ -2595,7 +2607,7 @@ RESULT CamIA10Engine::runAWB(HAL_AwbCfg* awbHalCfg) {
 
     if (awbDesc) {
         XCamAwbParam param;
-        param.mode = XCAM_AWB_MODE_AUTO;
+        param.mode = XCAM_AWB_MODE_MANUAL;
         result = awbDesc->set_stats(awbContext, &MeasResult);
         result = awbDesc->analyze_awb(awbContext, &param);
         result = awbDesc->get_results(awbContext, &retOuput);

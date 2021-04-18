@@ -2136,6 +2136,7 @@ RKiqCompositor::set_sensor_mode_data (struct isp_supplemental_sensor_mode_data *
             _ia_dcfg.flash_mode = HAL_FLASH_TORCH;
         else
             _ia_dcfg.flash_mode = HAL_FLASH_OFF;
+
         // update ae lock
         _ia_dcfg.aaa_locks &= ~HAL_3A_LOCKS_EXPOSURE;
         _ia_dcfg.aaa_locks |= aaaControls->ae.aeLock ? HAL_3A_LOCKS_EXPOSURE : 0;
@@ -2144,6 +2145,13 @@ RKiqCompositor::set_sensor_mode_data (struct isp_supplemental_sensor_mode_data *
         _ia_dcfg.aaa_locks |= aaaControls->awb.awbLock ? HAL_3A_LOCKS_WB : 0;
         // update af lock
     }
+
+    //(test) set some override settings
+    //seems the values can't be changed? changing lock also doesn't work/crashes
+    _ia_dcfg.aec_cfg.mode = HAL_AE_OPERATION_MODE_MANUAL;
+    _ia_dcfg.afc_cfg.mode = HAL_AF_MODE_FIXED;
+    _ia_dcfg.awb_cfg.mode = HAL_WB_DAYLIGHT;
+
     _isp10_engine->updateDynamicConfig(&_ia_dcfg);
     _ia_stat.sensor_mode = _ia_dcfg.sensor_mode;
 

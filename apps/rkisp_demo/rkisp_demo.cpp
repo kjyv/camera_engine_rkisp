@@ -157,6 +157,8 @@ static void construct_default_metas(CameraMetadata* metas)
     int64_t exptime_range_ns[2] = {0,30*1000*1000};
     int32_t sensitivity_range[2] = {0,3200};
     uint8_t ae_mode = ANDROID_CONTROL_AE_MODE_OFF;
+    uint8_t af_mode = ANDROID_CONTROL_AF_MODE_OFF;
+    uint8_t awb_mode = ANDROID_CONTROL_AWB_MODE_AUTO;
     uint8_t control_mode = ANDROID_CONTROL_MODE_AUTO;
     uint8_t ae_lock = ANDROID_CONTROL_AE_LOCK_OFF;
     int64_t exptime_ns = 2500;  //== 1/400 s
@@ -165,6 +167,8 @@ static void construct_default_metas(CameraMetadata* metas)
     metas->update(ANDROID_SENSOR_INFO_EXPOSURE_TIME_RANGE, exptime_range_ns, 2);
     metas->update(ANDROID_SENSOR_INFO_SENSITIVITY_RANGE, sensitivity_range, 2);
     metas->update(ANDROID_CONTROL_AE_MODE, &ae_mode, 1);
+    metas->update(ANDROID_CONTROL_AF_MODE, &af_mode, 1);
+    metas->update(ANDROID_CONTROL_AWB_MODE, &awb_mode, 1);
     metas->update(ANDROID_SENSOR_EXPOSURE_TIME, &exptime_ns, 1);
     metas->update(ANDROID_CONTROL_MODE, &control_mode, 1);
     metas->update(ANDROID_SENSOR_SENSITIVITY, &sensitivity, 1);
@@ -348,8 +352,7 @@ static int rkisp_setAeMaxExposureGain(void* &engine, float gain)
 
 static int rkisp_setManualGainAndTime(void* &engine, float hal_gain, float hal_time)
 {
-    struct control_params_3A* ctl_params =
-        (struct control_params_3A*)engine;
+    struct control_params_3A* ctl_params = (struct control_params_3A*)engine;
 
     int64_t exptime_ns = hal_time * 1000 * 1000 * 1000;
     // set to manual mode
@@ -475,6 +478,56 @@ static int rkisp_get3ALocks(void* &engine, int& curLocks)
 
     if (entry.data.u8[0] == ANDROID_CONTROL_AE_LOCK_ON)
         curLocks |= HAL_3A_LOCKS_EXPOSURE;
+
+    return 0;
+}
+
+int rkisp_set_fps_range(void* &engine, int max_fps) {
+    struct control_params_3A* ctl_params = (struct control_params_3A*)engine;
+
+    int32_t fps_range[2] = {1, 120};
+
+    fps_range[1] = max_fps;
+    ctl_params->_settings_metadata.update(ANDROID_CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES, fps_range, 2);
+    ctl_params->_settings_metadata.update(ANDROID_CONTROL_AE_TARGET_FPS_RANGE, fps_range, 2);
+
+    // should update new settings id
+    ctl_params->_frame_metas.id++;
+    ctl_params->_frame_metas.metas = ctl_params->_settings_metadata.getAndLock();
+    ctl_params->_settings_metadata.unlock(ctl_params->_frame_metas.metas);
+
+    _RKIspFunc.set_frame_params_func(_rkisp_engine,
+                                     &ctl_params->_frame_metas);
+
+    return 0;
+}
+
+int rkisp_set_focus_mode(void* &engine, uint8_t af_mode) {
+    struct control_params_3A* ctl_params = (struct control_params_3A*)engine;
+
+    ctl_params->_settings_metadata.update(ANDROID_CONTROL_AF_MODE, &af_mode, 2);
+
+    // should update new settings id
+    ctl_params->_frame_metas.id++;
+    ctl_params->_frame_metas.metas = ctl_params->_settings_metadata.getAndLock();
+    ctl_params->_settings_metadata.unlock(ctl_params->_frame_metas.metas);
+
+    _RKIspFunc.set_frame_params_func(_rkisp_engine, &ctl_params->_frame_metas);
+
+    return 0;
+}
+
+int rkisp_set_awb_mode(void* &engine, uint8_t awb_mode) {
+    struct control_params_3A* ctl_params = (struct control_params_3A*)engine;
+
+    ctl_params->_settings_metadata.update(ANDROID_CONTROL_AWB_MODE, &awb_mode, 2);
+
+    // should update new settings id
+    ctl_params->_frame_metas.id++;
+    ctl_params->_frame_metas.metas = ctl_params->_settings_metadata.getAndLock();
+    ctl_params->_settings_metadata.unlock(ctl_params->_frame_metas.metas);
+
+    _RKIspFunc.set_frame_params_func(_rkisp_engine, &ctl_params->_frame_metas);
 
     return 0;
 }

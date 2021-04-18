@@ -44,7 +44,7 @@ gst_xcam_3a_interface_get_type (void)
         };
 
         gst_xcam_3a_interface_type = g_type_register_static (G_TYPE_INTERFACE,
-                                     "GsXCam3AInterface", &gst_xcam_3a_interface_info, 0);
+                                     "GstXCam3AInterface", &gst_xcam_3a_interface_info, 0);
     }
     return gst_xcam_3a_interface_type;
 }
