@@ -677,12 +677,13 @@ static void compressNV12toJPEG(const vector<uint8_t>& input, const int width, co
     DBG("libjpeg produced %ld bytes", outlen);
 
     output = vector<uint8_t>(outbuffer, outbuffer + outlen);
+    free(outbuffer);
 }
 
 
 static void process_image(const void *p, int size)
 {
-    ERR("process_image size: %d\n",size);
+    DBG("process_image size: %d\n", size);
 
     vector<uint8_t> output;
 
@@ -697,7 +698,7 @@ static void process_image(const void *p, int size)
     fflush(fp);
 }
 
-static int read_frame(FILE *fp)
+static int read_frame(FILE *fp, unsigned frameIdx)
 {
         struct v4l2_buffer buf;
         int i, bytesused;
@@ -741,7 +742,7 @@ static void mainloop(void)
         unsigned int count = frame_count;
         float exptime, expgain;
         int64_t frame_id, frame_sof;
-        //fprintf(stderr, "start: expo %f, gain %f, step %f\n", mae_expo, mae_gain, expo_test_step);
+        DBG("start: expo %f, gain %f, step %f\n", mae_expo, mae_gain, expo_test_step);
 
         if (mae_gain > 0 && mae_expo > 0)
             rkisp_setManualGainAndTime((void*&)g_3A_control_params, mae_gain, mae_expo);
@@ -749,13 +750,16 @@ static void mainloop(void)
             rkisp_setAeMode((void*&)g_3A_control_params, HAL_AE_OPERATION_MODE_AUTO);
 
         while (count-- > 0) {
-            ERR("No.%d\n",frame_count - count);
-            if(expo_test>0){
+            unsigned frameIdx = frame_count - count;
+            DBG("No.%d\n", frameIdx);
+
+            if (expo_test>0) {
                 rkisp_setManualGainAndTime((void*&)g_3A_control_params, mae_gain, mae_expo);
-                fprintf(stderr, "expo %f, gain %f, step %f\n", mae_expo, mae_gain, expo_test_step);
+                DBG("expo %f, gain %f, step %f\n", mae_expo, mae_gain, expo_test_step);
                 mae_expo += expo_test_step;
             } else {
-            }//end if
+            }
+
             // examples show how to use 3A interfaces
             rkisp_getAeTime((void*&)g_3A_control_params, exptime);
             rkisp_getAeGain((void*&)g_3A_control_params, expgain);
@@ -763,7 +767,18 @@ static void mainloop(void)
             rkisp_getAeMaxExposureTime((void*&)g_3A_control_params, exptime);
             rkisp_get_meta_frame_id((void*&)g_3A_control_params, frame_id);
             rkisp_get_meta_frame_sof_ts((void*&)g_3A_control_params, frame_sof);
-            read_frame(fp);
+
+
+            char *out_file_indexed;
+            asprintf(&out_file_indexed, out_file, frameIdx);
+            if (fp != stdout && (fp = fopen(out_file_indexed, "w")) == NULL) {
+                ERR("Creating output file failed");
+                exit(0);
+            }
+            read_frame(fp, frame_count - count);
+            if (fp != stdout) {
+               fclose(fp); 
+            }
         }
         ERR("\nREAD AND SAVE DONE!\n");
 }
@@ -1332,17 +1347,14 @@ int main(int argc, char **argv)
         parse_args(argc, argv);
 
         if (!strcmp(out_file, "-")) {
-                fp = stdout;
-                silent = 1;
-        } else if ((fp = fopen(out_file, "w")) == NULL) {
-            perror("Creat file failed");
-            exit(0);
+            fp = stdout;
+            silent = 1;
         }
+
         open_device();
         init_device();
         start_capturing();
         mainloop();
-        fclose(fp);
         stop_capturing();
         uninit_device();
         close_device();
