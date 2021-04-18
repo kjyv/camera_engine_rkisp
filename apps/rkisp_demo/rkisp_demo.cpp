@@ -730,8 +730,10 @@ static int read_frame(FILE *fp, unsigned frameIdx)
             bytesused = buf.m.planes[0].bytesused;
         else
             bytesused = buf.bytesused;
-        process_image(buffers[i].start, bytesused);
-        ERR("bytesused %d\n", bytesused);
+        if (frameIdx > skip_frames) {
+            process_image(buffers[i].start, bytesused);
+            ERR("bytesused %d\n", bytesused);
+        }
 
         if (-1 == xioctl(fd, VIDIOC_QBUF, &buf))
             errno_exit("VIDIOC_QBUF"); 
