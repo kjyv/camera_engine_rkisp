@@ -102,10 +102,9 @@ static float mae_expo = 0.0f;
 FILE *fp;
 static int silent;
 static unsigned int drm_handle;
-static int expo_test = 0;
-static float expo_test_step = 0.005;
-static int delay_mks = 0;
 static int skip_frames = 0;
+static int raw = 0;
+static int fps = 0;
 
 #define DBG(...) do { if(!silent) printf(__VA_ARGS__); } while(0)
 #define ERR(...) do { if(!silent) fprintf(stderr, __VA_ARGS__); } while (0)
@@ -141,13 +140,12 @@ void metadata_result_callback(const struct cl_result_callback_ops *ops,
                               struct rkisp_cl_frame_metadata_s *result)
 {
     camera_metadata_entry entry;
-    struct control_params_3A* ctl_params =
-        (struct control_params_3A*)ops;
+    struct control_params_3A* ctl_params = (struct control_params_3A*)ops;
 
     SmartLock lock(ctl_params->_meta_mutex);
     /* this will clone results to _result_metadata */
     ctl_params->_result_metadata = result->metas;
-    ERR("meta callback!\n");
+    //ERR("meta callback!\n");
 }
 
 /*
@@ -676,7 +674,7 @@ static void compressNV12toJPEG(const vector<uint8_t>& input, const int width, co
     jpeg_finish_compress(&cinfo);
     jpeg_destroy_compress(&cinfo);
 
-    DBG("libjpeg produced %ld bytes", outlen);
+    DBG("libjpeg produced %ld bytes\n", outlen);
 
     output = vector<uint8_t>(outbuffer, outbuffer + outlen);
     free(outbuffer);
@@ -687,56 +685,79 @@ static void process_image(const void *p, int size)
 {
     DBG("process_image size: %d\n", size);
 
-    vector<uint8_t> output;
+    if (raw) {
+        fwrite(p, size, 1, fp);
+    } else {
+        vector<uint8_t> output;
 
-    const uint8_t *intP = (uint8_t *) p;
-    vector<uint8_t> input(intP, intP + size); 
-    compressNV12toJPEG(input, width, height, output);
+        const uint8_t *intP = (uint8_t *) p;
+        vector<uint8_t> input(intP, intP + size); 
+        compressNV12toJPEG(input, width, height, output);
 
-    fwrite(&output[0], sizeof(vector<uint8_t>::value_type), output.size(), fp);
-
-    //fwrite(p, size, 1, fp);
+        fwrite(&output[0], sizeof(vector<uint8_t>::value_type), output.size(), fp);
+    }
 
     fflush(fp);
 }
 
-static int read_frame(FILE *fp, unsigned frameIdx)
-{
+
+int64_t difftimespec_ns(const struct timespec after, const struct timespec before) {
+    return ((int64_t)after.tv_sec - (int64_t)before.tv_sec) * (int64_t)1000000000
+             + ((int64_t)after.tv_nsec - (int64_t)before.tv_nsec);
+ }
+
+struct timespec lastFrametime;
+
+static int read_frame(FILE *fp, unsigned frameIdx) {
         struct v4l2_buffer buf;
         int i, bytesused;
 
-        CLEAR(buf);
-
-        buf.type = buf_type;
-        if (io == IO_METHOD_MMAP)
-            buf.memory = V4L2_MEMORY_MMAP;
-        else if (io == IO_METHOD_DMABUF)
-            buf.memory = V4L2_MEMORY_DMABUF;
-        else
-            buf.memory = V4L2_MEMORY_USERPTR;
-
-        if (V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE == buf_type) {
-            struct v4l2_plane planes[FMT_NUM_PLANES];
-            buf.m.planes = planes;
-            buf.length = FMT_NUM_PLANES;
-        }
-
-        if (-1 == xioctl(fd, VIDIOC_DQBUF, &buf)) 
-                errno_exit("VIDIOC_DQBUF");
-
-        i = buf.index;
-
-        if (V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE == buf_type)
-            bytesused = buf.m.planes[0].bytesused;
-        else
-            bytesused = buf.bytesused;
         if (frameIdx > skip_frames) {
-            process_image(buffers[i].start, bytesused);
-            ERR("bytesused %d\n", bytesused);
-        }
+            struct timespec spec;
+            clock_gettime(CLOCK_MONOTONIC, &spec);
 
-        if (-1 == xioctl(fd, VIDIOC_QBUF, &buf))
-            errno_exit("VIDIOC_QBUF"); 
+            int64_t timeSinceLastFrame = difftimespec_ns(spec, lastFrametime);
+            printf("since last frame %" PRId64 " ns\n", timeSinceLastFrame);
+            long long int timePerFrame = 1000*1000*1000/fps;  //ns per frame
+            printf("time per frame %lld ns\n", timePerFrame);
+            if (fps > 0 && timeSinceLastFrame < timePerFrame) {
+                printf("waiting for %lld ns\n", (timePerFrame - timeSinceLastFrame));
+                usleep((timePerFrame - timeSinceLastFrame)/1000);
+            }
+
+            CLEAR(buf);
+
+            buf.type = buf_type;
+            if (io == IO_METHOD_MMAP)
+                buf.memory = V4L2_MEMORY_MMAP;
+            else if (io == IO_METHOD_DMABUF)
+                buf.memory = V4L2_MEMORY_DMABUF;
+            else
+                buf.memory = V4L2_MEMORY_USERPTR;
+
+            if (V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE == buf_type) {
+                struct v4l2_plane planes[FMT_NUM_PLANES];
+                buf.m.planes = planes;
+                buf.length = FMT_NUM_PLANES;
+            }
+
+            if (-1 == xioctl(fd, VIDIOC_DQBUF, &buf)) 
+                    errno_exit("VIDIOC_DQBUF");
+
+            i = buf.index;
+
+            if (V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE == buf_type)
+                bytesused = buf.m.planes[0].bytesused;
+            else
+                bytesused = buf.bytesused;
+
+            process_image(buffers[i].start, bytesused);
+            lastFrametime = spec;
+
+            if (-1 == xioctl(fd, VIDIOC_QBUF, &buf)) {
+                errno_exit("VIDIOC_QBUF"); 
+            }
+        }
 
         return 1;
 }
@@ -746,32 +767,26 @@ static void mainloop(void)
         unsigned int count = frame_count;
         float exptime, expgain;
         int64_t frame_id, frame_sof;
-        DBG("start: expo %f, gain %f, step %f\n", mae_expo, mae_gain, expo_test_step);
 
-        if (mae_gain > 0 && mae_expo > 0)
+        if (mae_gain > 0 && mae_expo > 0) {
             rkisp_setManualGainAndTime((void*&)g_3A_control_params, mae_gain, mae_expo);
-        else
+        } 
+        else {
             rkisp_setAeMode((void*&)g_3A_control_params, HAL_AE_OPERATION_MODE_AUTO);
-
+        }
 
         while (count-- > 0) {
             unsigned frameIdx = frame_count - count;
             DBG("No.%d\n", frameIdx);
 
-            if (expo_test>0) {
-                rkisp_setManualGainAndTime((void*&)g_3A_control_params, mae_gain, mae_expo);
-                DBG("expo %f, gain %f, step %f\n", mae_expo, mae_gain, expo_test_step);
-                mae_expo += expo_test_step;
-            } else {
-            }
-
             // examples show how to use 3A interfaces
-            rkisp_getAeTime((void*&)g_3A_control_params, exptime);
+            /*rkisp_getAeTime((void*&)g_3A_control_params, exptime);
             rkisp_getAeGain((void*&)g_3A_control_params, expgain);
             rkisp_getAeMaxExposureGain((void*&)g_3A_control_params, expgain);
             rkisp_getAeMaxExposureTime((void*&)g_3A_control_params, exptime);
             rkisp_get_meta_frame_id((void*&)g_3A_control_params, frame_id);
             rkisp_get_meta_frame_sof_ts((void*&)g_3A_control_params, frame_sof);
+            */
 
             char *out_file_indexed;
             asprintf(&out_file_indexed, out_file, frameIdx);
@@ -1248,25 +1263,25 @@ void parse_args(int argc, char **argv)
        int this_option_optind = optind ? optind : 1;
        int option_index = 0;
        static struct option long_options[] = {
-           {"width",    required_argument, 0, 'w' },
-           {"height",   required_argument, 0, 'h' },
-           {"memory",   required_argument, 0, 'm' },
-           {"format",   required_argument, 0, 'f' },
-           {"iqfile",   required_argument, 0, 'i' },
-           {"device",   required_argument, 0, 'd' },
-           {"output",   required_argument, 0, 'o' },
-           {"count",    required_argument, 0, 'c' },
-           {"expo",     required_argument, 0, 'e' },
-           {"gain",     required_argument, 0, 'g' },
-           {"help",     no_argument,       0, 'p' },
-           {"silent",   no_argument,       0, 's' },
-           {"expo_test",required_argument, 0, 't' },
-           {"delay",    required_argument, 0, 'l' },
-           {"skip_frames", required_argument, 0, 'k' },
-           {0,          0,                 0,  0  }
+           {"width",        required_argument, 0, 'w' },
+           {"height",       required_argument, 0, 'h' },
+           {"memory",       required_argument, 0, 'm' },
+           {"format",       required_argument, 0, 'f' },
+           {"iqfile",       required_argument, 0, 'i' },
+           {"device",       required_argument, 0, 'd' },
+           {"output",       required_argument, 0, 'o' },
+           {"count",        required_argument, 0, 'c' },
+           {"expo",         required_argument, 0, 'e' },
+           {"gain",         required_argument, 0, 'g' },
+           {"fps",          required_argument, 0, 'q' },
+           {"skip_frames",  required_argument, 0, 'k' },
+           {"raw",          no_argument,       0, 'b' },
+           {"help",         no_argument,       0, 'p' },
+           {"silent",       no_argument,       0, 's' },
+           {0,               0,                0,  0  }
        };
 
-       c = getopt_long(argc, argv, "w:h:m:f:i:d:o:c:e:g:ps:t",
+       c = getopt_long(argc, argv, "w:h:m:f:i:d:o:c:e:g:q:k:b:p:s",
            long_options, &option_index);
        if (c == -1)
            break;
@@ -1312,17 +1327,15 @@ void parse_args(int argc, char **argv)
        case 's':
            silent = 1;
            break;
-       case 't':
-           expo_test_step = atof(optarg);
-           expo_test = 1;
-           break;
-       case 'l':
-           delay_mks = atoi(optarg);
-           break;
        case 'k':
            skip_frames = atoi(optarg);
            break;
-
+       case 'q':
+           fps = atoi(optarg);
+           break;
+       case 'b':
+           raw = 1;
+           break;
        case '?':
        case 'p':
            DBG("Usage: %s to capture rkisp1 frames\n"
@@ -1338,9 +1351,9 @@ void parse_args(int argc, char **argv)
                   "         --expo,   default 0,               optional, exposure in s\n"
                   "                   Manually AE is enable only if --gain and --expo are not zero\n"
                   "         --silent,                          optional, subpress debug log\n"
-                  "         --expo_test,                       optional, change exposure for buffers\n"
-                  "         --delay,                           optional, delay in microseconds  between shots\n"
-                  "         --skip_frames,                     optional, skip frames from beging of sequence\n",
+                  "         --skip_frames,                     optional, skip frames from beging of sequence\n"
+                  "         --fps,    default 0                optional, maximum frames per second to capture\n"
+                  "         --raw,                             optional, output file as nv12 (yuv)\n",
                   argv[0]);
            exit(-1);
 
@@ -1353,7 +1366,6 @@ void parse_args(int argc, char **argv)
         DBG("arguments --output and --device are required\n");
         exit(-1);
    }
-
 }
 
 int main(int argc, char **argv)
